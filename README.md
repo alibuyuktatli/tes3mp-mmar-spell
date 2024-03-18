@@ -13,7 +13,9 @@ This plugin replaces default mark and recall spells. Removes existing spells fro
 1. Place this repo into your `CoreScripts/scripts/custom/` directory.
 
 1. Add the following to `CoreScripts/scripts/customScripts.lua` (If you are **not** using DataManager, do not add the first line):
-        DataManager = require("custom/DataManager/main")
-        require("custom/mmar")
+```lua
+DataManager = require("custom/DataManager/main")
+require("custom/mmar")
+```
 
 1. Optionally configure MMAR by editing the `CoreScripts/data/custom/__config_MultipleMarkAndRecall.json` file (If you have DataManager, if you dont you can edit from lua file).
