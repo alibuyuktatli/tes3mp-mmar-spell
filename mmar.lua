@@ -1,92 +1,70 @@
-local MultipleMarkAndRecall = {}
+local MMAR = {}
 
-local scriptName = "MultipleMarkAndRecall"
-local logPrefix = "[MMAR]: "
-
-local Mysticism = "Mysticism"
-local teleportForbidden = {
-    "Akulakhan's Chamber",
-    "Sotha Sil,", "Solstheim, Mortrag Glacier: Entry", "Solstheim, Mortrag Glacier: Outer Ring",
-    "Solstheim, Mortrag Glacier: Inner Ring", "Solstheim, Mortrag Glacier: Huntsman's Hall"
-}
-
-MultipleMarkAndRecall.guis = {
+MMAR.gui = {
     markInputDialog = 31102,
     recallList = 31103,
     markSelection = 31104,
     markDelete = 31105
 }
 
-MultipleMarkAndRecall.defaultConfig = {
+MMAR.config = {
     maxMarks = 18,
     msgMark = color.Green .. "The mark \"%s\" has been set!" .. color.Default,
     msgMarkRm = color.Green .. "The mark \"%s\" has been deleted!" .. color.Default,
-    msgNotAllowed = color.Red .. "Teleportation is not allowed here!" .. color.Default,
+    msgRecallNotAllowed = color.Red .. "Recall is not allowed here!" .. color.Default,
+    msgMarkNotAllowed = color.Red .. "Mark is not allowed here!" .. color.Default,
     msgRecall = color.Green .. "Recalled to: \"%s\"!" .. color.Default,
+    msgNoMarkLeft = color.Red .. "You do not have any free marks!" .. color.Default,
     over10mod = 2,
     over50mod = 7,
-    spellMagickaCost = 12,
-    teleportForbidden = teleportForbidden
+    recallMagickaCost = 10,
+    markMagickaCost = 10,
+    skill = "Mysticism",
+    logPrefix = "[MMAR]: ",
+    recallForbiddenCells = {
+        "Akulakhan's Chamber",
+        "Sotha Sil,", "Solstheim, Mortrag Glacier: Entry", "Solstheim, Mortrag Glacier: Outer Ring",
+        "Solstheim, Mortrag Glacier: Inner Ring", "Solstheim, Mortrag Glacier: Huntsman's Hall"
+    },
+    markForbiddenCells = {},
 }
 
-if DataManager then
-    MultipleMarkAndRecall.config = DataManager.loadConfiguration(scriptName, MultipleMarkAndRecall.defaultConfig)
-else
-    MultipleMarkAndRecall.config = MultipleMarkAndRecall.defaultConfig
-end
-
-math.randomseed(os.time())
-
 local function dbg(msg)
-    tes3mp.LogMessage(enumerations.log.VERBOSE, logPrefix .. msg)
+    tes3mp.LogMessage(enumerations.log.VERBOSE, MMAR.config.logPrefix .. msg)
 end
 
 local function fatal(msg)
-   tes3mp.LogMessage(enumerations.log.FATAL, logPrefix .. msg)
+   tes3mp.LogMessage(enumerations.log.FATAL, MMAR.config.logPrefix .. msg)
 end
 
 local function warn(msg)
-    tes3mp.LogMessage(enumerations.log.WARN, logPrefix .. msg)
+    tes3mp.LogMessage(enumerations.log.WARN, MMAR.config.logPrefix .. msg)
 end
 
 local function info(msg)
-    tes3mp.LogMessage(enumerations.log.INFO, logPrefix .. msg)
-end
-
--- Check for new settings that may not be present
-if MultipleMarkAndRecall.config.over10mod == nil then
-    warn("No 'over10mod' value was found in your config!")
-    warn("Please set that, the default of '2' is being used.")
-    MultipleMarkAndRecall.config.over10mod = 2
-end
-if MultipleMarkAndRecall.config.over50mod == nil then
-    warn("No 'over50mod' value was found in your config!")
-    warn("Please set that, the default of '7' is being used.")
-    MultipleMarkAndRecall.config.over50mod = 7
+    tes3mp.LogMessage(enumerations.log.INFO, MMAR.config.logPrefix .. msg)
 end
 
 local function chatMsg(pid, msg)
     dbg("Called chatMsg for pid: " .. pid .. " and msg: " .. msg)
-   tes3mp.SendMessage(pid, "[MMAR]: " .. msg .. "\n")
+   tes3mp.SendMessage(pid, MMAR.config.logPrefix .. msg .. "\n")
 end
 
-local function canTeleport(pid)
-    dbg("Called canTeleport for pid: " .. pid)
+local function isRecallForbidden(pid)
+    dbg("Called isRecallForbidden for pid: " .. pid)
     local currentCell = tes3mp.GetCell(pid)
-    if tableHelper.containsValue(MultipleMarkAndRecall.config.teleportForbidden, currentCell) then
-        return false
-    end
-    return true
+    return tableHelper.containsValue(MMAR.config.recallForbiddenCells, currentCell)
+end
+
+local function isMarkForbidden(pid)
+    dbg("Called isMarkForbidden for pid: " .. pid)
+    local currentCell = tes3mp.GetCell(pid)
+    return tableHelper.containsValue(MMAR.config.markForbiddenCells, currentCell)
 end
 
 local function doRecall(pid, name)
     dbg("Called doRecall for pid: " .. pid .. " and name: " .. name)
     local player = Players[pid]
-
-    if not canTeleport(pid) then
-        chatMsg(pid, MultipleMarkAndRecall.config.msgNotAllowed)
-        return
-    end
 
     local mark = player.data.customVariables.MultipleMarkAndRecall.marks[name]
 
@@ -97,31 +75,29 @@ local function doRecall(pid, name)
     player.data.location.rotZ = mark.rot
 
     player:LoadCell()
-    chatMsg(pid, string.format(MultipleMarkAndRecall.config.msgRecall, name))
+    chatMsg(pid, string.format(MMAR.config.msgRecall, name))
 end
 
 local function getMarkCount(pid)
     dbg("Called getMarkCount for pid: " .. pid)
     local extraMarks = 0
     local markCount = 2
-    local mysticism = Players[pid].data.skills[Mysticism].base
+    local mysticism = Players[pid].data.skills[MMAR.config.skill].base
     local totalMarks
 
     if mysticism >= 50 then
-        local count = math.floor((mysticism - 50) / 5) + MultipleMarkAndRecall.config.over50mod
+        local count = math.floor((mysticism - 50) / 5) + MMAR.config.over50mod
         extraMarks = extraMarks + count
-
     elseif mysticism >= 10 then
-        extraMarks = math.floor(mysticism / 10) + MultipleMarkAndRecall.config.over10mod
-
+        extraMarks = math.floor(mysticism / 10) + MMAR.config.over10mod
     else
         extraMarks = 0
     end
 
     totalMarks = markCount + extraMarks
 
-    if totalMarks > MultipleMarkAndRecall.config.maxMarks then
-        totalMarks = MultipleMarkAndRecall.config.maxMarks
+    if totalMarks > MMAR.config.maxMarks then
+        totalMarks = MMAR.config.maxMarks
     end
 
     return totalMarks
@@ -132,7 +108,7 @@ local function rmMark(pid, name)
     local player = Players[pid]
     player.data.customVariables.MultipleMarkAndRecall.marks[name] = nil
     tableHelper.cleanNils(player.data.customVariables.MultipleMarkAndRecall.marks)
-    chatMsg(pid, string.format(MultipleMarkAndRecall.config.msgMarkRm, name))
+    chatMsg(pid, string.format(MMAR.config.msgMarkRm, name))
 end
 
 local function setMark(pid, name)
@@ -147,170 +123,228 @@ local function setMark(pid, name)
         rot = tes3mp.GetRotZ(pid)
     }
 
-    chatMsg(pid, string.format(MultipleMarkAndRecall.config.msgMark, name))
+    chatMsg(pid, string.format(MMAR.config.msgMark, name))
 end
 
-MultipleMarkAndRecall.OnServerPostInit = function()
-    local recordStore = RecordStores.spell.data
-    local id = "mmar_mark"
-    recordStore.permanentRecords[id] = {
-        name = "[MMAR] Mark",
-        subtype = 0,
-        cost = MultipleMarkAndRecall.config.spellMagickaCost,
-        effects = {{
-            attribute = -1,
-            area = 0,
-            duration = 0,
-            id = 68,
-            rangeType = 0,
-            skill = -1,
-            magnitudeMin = 0,
-            magnitudeMax = 0
-        }}
-    }
-    id = "mmar_recall"
-    recordStore.permanentRecords[id] = {
-        name = "[MMAR] Recall",
-        subtype = 0,
-        cost = MultipleMarkAndRecall.config.spellMagickaCost,
-        effects = {{
-            attribute = -1,
-            area = 0,
-            duration = 0,
-            id = 68,
-            rangeType = 0,
-            skill = -1,
-            magnitudeMin = 0,
-            magnitudeMax = 0
-        }}
-    }
-end
-
-MultipleMarkAndRecall.updateOldSpells = function(pid)
-    local player = Players[pid]
-    local markChange = false
-    local recallChange = false
-        
-    for _, spellId in pairs(player.data.spellbook) do
-        if spellId == "mark" then
-            markChange = true
-        elseif spellId == "recall" then
-            recallChange = true
+local function getChoice(pid, i)
+    local x = 1
+    for name, data in pairs(Players[pid].data.customVariables.MultipleMarkAndRecall.marks) do
+        if x == i then
+            return x, name, data
         end
-    end
-    if markChange then
-        logicHandler.RunConsoleCommandOnPlayer(pid, "player->removespell mark", false)
-        logicHandler.RunConsoleCommandOnPlayer(pid, "player->addspell mmar_mark", false)
-    end
-    if recallChange then
-        logicHandler.RunConsoleCommandOnPlayer(pid, "player->removespell recall", false)
-        logicHandler.RunConsoleCommandOnPlayer(pid, "player->addspell mmar_recall", false)
+        x = x + 1
     end
 end
 
-MultipleMarkAndRecall.OnPlayerAuthentified = function(eventStatus, pid)
+MMAR.OnServerPostInit = function()
+    local permanentSpellRecords = RecordStores.spell
+    local permanentEnchantmentRecords = RecordStores.enchantment
+
+        -- Spells
+    -- Recall
+    permanentSpellRecords.data.permanentRecords.recall = {
+        name = "Recall",
+        cost = MMAR.config.recallMagickaCost,
+        subtype = 0,
+        flags = 1,
+        effects = { 
+            {
+                attribute = -1,
+                area = 0,
+                duration = 0,
+                id = 61,
+                rangeType = 0,
+                skill = -1,
+                magnitudeMax = 0,
+                magnitudeMin = 0
+            }
+        }
+    }
+    -- Mark
+    permanentSpellRecords.data.permanentRecords.mark = {
+        name = "Mark",
+        cost = MMAR.config.markMagickaCost,
+        subtype = 0,
+        flags = 1,
+        effects = {
+            {
+                attribute = -1,
+                area = 0,
+                duration = 0,
+                id = 60,
+                rangeType = 0,
+                skill = -1,
+                magnitudeMax = 0,
+                magnitudeMin = 0
+            }
+        }
+    }
+        -- Enchantments
+    -- Mark
+    local markEnchantment = {
+        cost = MMAR.config.markMagickaCost,		
+        subtype = 2,
+        flags = 90,
+        charge = 90,
+        effects = {
+            {
+                attribute = -1,
+                area = 0,
+                duration = 0,
+                id = 60,
+                rangeType = 0,
+                skill = -1,
+                magnitudeMax = 0,
+                magnitudeMin = 0
+            }
+        }
+    }
+    -- Recall
+    local recallEnchantment = {
+        cost = MMAR.config.recallMagickaCost,
+        subtype = 2,
+        flags = 90,
+        charge = 90,
+        effects = {
+            {
+                attribute = -1,
+                area = 0,
+                duration = 0,
+                id = 61,
+                rangeType = 0,
+                skill = -1,
+                magnitudeMax = 0,
+                magnitudeMin = 0
+            }
+        }
+    }
+
+    permanentEnchantmentRecords.data.permanentRecords.mark_en = markEnchantment
+    permanentEnchantmentRecords.data.permanentRecords.markring_en = markEnchantment
+
+    permanentEnchantmentRecords.data.permanentRecords.recallring_en = markEnchantment
+    permanentEnchantmentRecords.data.permanentRecords.recall_en = markEnchantment
+
+    permanentSpellRecords:Save()
+    permanentEnchantmentRecords:Save()
+end
+
+MMAR.OnPlayerAuthentified = function(eventStatus, pid)
     if eventStatus.validCustomHandlers then
-        dbg("Called MultipleMarkAndRecall.OnPlayerAuthentified for pid: " .. pid)
+        dbg("Called MMAR.OnPlayerAuthentified for pid: " .. pid)
         local player = Players[pid]
         if player.data.customVariables.MultipleMarkAndRecall == nil then
             player.data.customVariables.MultipleMarkAndRecall = {}
             player.data.customVariables.MultipleMarkAndRecall.marks = {}
         end
-        MultipleMarkAndRecall.updateOldSpells(pid)
     else
-        fatal(scriptName .. " cannot work right!")
-        fatal("Unable to set custom player data!")
+        fatal("MMAR Unable to set custom player data!")
     end
 end
 
-MultipleMarkAndRecall.OnPlayerSpellsActive = function(eventStatus, pid, playerPacket)
+local function listMarks(pid)
     local player = Players[pid]
+    local marks = player.data.customVariables.MultipleMarkAndRecall.marks
+    local txt = "Cancel"
+    if tableHelper.isEmpty(marks) then
+        txt = "You have no marks set."
+    else
+        for name, pos in pairs(marks) do
+            txt = txt .. string.format("\n%s (%s)", name, pos.cell)
+        end
+    end
+    return txt
+end
+
+MMAR.openMarkMenu = function(pid)
+    if isMarkForbidden(pid) then
+        chatMsg(pid, MMAR.config.msgMarkNotAllowed)
+        return
+    end
+
+    tes3mp.CustomMessageBox(pid, MMAR.gui.markSelection, "Mark Selection", "Delete Mark;Create Mark;Cancel")
+end
+
+MMAR.openRecallMenu = function(pid)
+    if isRecallForbidden(pid) then
+        chatMsg(pid, MMAR.config.msgRecallNotAllowed)
+        return
+    end
+
+    local curMarkCount = tableHelper.getCount(Players[pid].data.customVariables.MultipleMarkAndRecall.marks)
+    local maxMarkCount = getMarkCount(pid)
+    tes3mp.ListBox(pid, MMAR.gui.recallList, string.format("Marks (%s/%s)", curMarkCount, maxMarkCount), listMarks(pid))
+end
+
+MMAR.OnPlayerSpellsActive = function(eventStatus, pid, playerPacket)
     local action = playerPacket.action
     if action == enumerations.spellbook.ADD then
-        local spells = playerPacket.spellsActive
-
-        for spellId,spellTable in pairs(spells) do
-            if spellId == "mmar_mark" then
-                tes3mp.CustomMessageBox(pid, MultipleMarkAndRecall.guis.markSelection, "Mark Selection", "Delete Mark;Create Mark;Cancel")
-            elseif spellId == "mmar_recall" then
-                local marks = player.data.customVariables.MultipleMarkAndRecall.marks
-                local txt = "Cancel"
-                if tableHelper.isEmpty(marks) then
-                    txt = "You have no marks set."
-                else
-                    for name, pos in pairs(marks) do
-                        txt = txt .. string.format("\n%s (%s)", name, pos.cell)
+        for spellId, spellInstances in pairs(playerPacket.spellsActive) do
+            for spellInstanceIndex, spellInstanceValues in pairs(spellInstances) do
+                for effectIndex, effectTable in pairs(spellInstanceValues.effects) do
+                    if effectTable.id == enumerations.effects.MARK then
+                        MMAR.openMarkMenu(pid)
+                        break
+                    elseif effectTable.id == enumerations.effects.RECALL then
+                        MMAR.openRecallMenu(pid)
+                        break
                     end
                 end
-
-                local curMarkCount = tableHelper.getCount(player.data.customVariables.MultipleMarkAndRecall.marks)
-                local maxMarkCount = getMarkCount(pid)
-                tes3mp.ListBox(pid, MultipleMarkAndRecall.guis.recallList, string.format("Marks (%s/%s)", curMarkCount, maxMarkCount), txt)
             end
         end
     end
 end
 
-MultipleMarkAndRecall.OnPlayerSpellbook = function(eventStatus, pid)
-    MultipleMarkAndRecall.updateOldSpells(pid)
-end
-
-MultipleMarkAndRecall.OnGUIAction = function(eventStatus, pid, idGui, data)
+MMAR.OnGUIAction = function(eventStatus, pid, idGui, data)
     local player = Players[pid]
-	if idGui == MultipleMarkAndRecall.guis.markInputDialog then
+	if idGui == MMAR.gui.markInputDialog then
         if data and string.match(data, "%S") then
             setMark(pid, data)
         end
-    elseif idGui == MultipleMarkAndRecall.guis.recallList then
-        local sId = tonumber(data)
-        local c = 1
-        for name, _ in pairs(player.data.customVariables.MultipleMarkAndRecall.marks) do
-            if c == sId then
-                doRecall(pid, name)
-                break
-            end
-            c = c + 1
+    elseif idGui == MMAR.gui.recallList then
+        local index, name, data = getChoice(pid, tonumber(data))
+        if name then
+            doRecall(pid, name)
         end
-    elseif idGui == MultipleMarkAndRecall.guis.markDelete then
-        local sId = tonumber(data)
-        local c = 1
-        for name, _ in pairs(player.data.customVariables.MultipleMarkAndRecall.marks) do
-            if c == sId then
-                rmMark(pid, name)
-                break
-            end
-            c = c + 1
+    elseif idGui == MMAR.gui.markDelete then
+        local index, name, data = getChoice(pid, tonumber(data))
+        if name then
+            rmMark(pid, name)
         end
-    elseif idGui == MultipleMarkAndRecall.guis.markSelection then
+    elseif idGui == MMAR.gui.markSelection then
         data = tonumber(data)
         if data == 0 then
-            local marks = player.data.customVariables.MultipleMarkAndRecall.marks
-            local txt = "Cancel"
-            if tableHelper.isEmpty(marks) then
-                txt = "You have no marks set."
-            else
-                for name, pos in pairs(marks) do
-                    txt = txt .. string.format("\n%s (%s)", name, pos.cell)
-                end
-            end
-
             local curMarkCount = tableHelper.getCount(player.data.customVariables.MultipleMarkAndRecall.marks)
             local maxMarkCount = getMarkCount(pid)
-            tes3mp.ListBox(pid, MultipleMarkAndRecall.guis.markDelete, string.format("Marks (%s/%s)", curMarkCount, maxMarkCount), txt)
+            tes3mp.ListBox(pid, MMAR.gui.markDelete, string.format("Delete Mark (%s/%s)", curMarkCount, maxMarkCount), listMarks(pid))
         elseif data == 1 then
             local curMarkCount = tableHelper.getCount(player.data.customVariables.MultipleMarkAndRecall.marks)
             local maxMarkCount = getMarkCount(pid)
             if curMarkCount == maxMarkCount then
-                chatMsg(pid, color.Red .. "You do not have any free marks!" .. color.Default)
+                chatMsg(pid, MMAR.config.msgNoMarkLeft)
                 return
             end
-            tes3mp.InputDialog(pid, MultipleMarkAndRecall.guis.markInputDialog, "Mark name (empty for cancel)", "")	
+            tes3mp.InputDialog(pid, MMAR.gui.markInputDialog, "Mark name (empty for cancel)", "")	
         end
 	end	
 end
 
-customEventHooks.registerHandler("OnPlayerAuthentified", MultipleMarkAndRecall.OnPlayerAuthentified)
-customEventHooks.registerHandler("OnPlayerSpellsActive", MultipleMarkAndRecall.OnPlayerSpellsActive)
-customEventHooks.registerHandler("OnServerPostInit", MultipleMarkAndRecall.OnServerPostInit)
-customEventHooks.registerHandler("OnPlayerSpellbook", MultipleMarkAndRecall.OnPlayerSpellbook)
-customEventHooks.registerHandler("OnGUIAction", MultipleMarkAndRecall.OnGUIAction)
+-- rickoff's function
+MMAR.OnRecordDynamic = function(eventStatus, pid, recordArray, storeType)
+	if storeType == "enchantment" or storeType == "spell" or storeType == "potion" then
+        for _, record in ipairs(recordArray) do
+			for _, effect in ipairs(record.effects) do
+				if effect.id == enumerations.effects.MARK or effect.id == enumerations.effects.RECALL then
+					effect.magnitudeMin = 0
+					effect.magnitudeMax = 0
+				end
+			end
+		end
+	end
+end
+
+customEventHooks.registerHandler("OnPlayerAuthentified", MMAR.OnPlayerAuthentified)
+customEventHooks.registerHandler("OnPlayerSpellsActive", MMAR.OnPlayerSpellsActive)
+customEventHooks.registerHandler("OnServerPostInit", MMAR.OnServerPostInit)
+customEventHooks.registerHandler("OnGUIAction", MMAR.OnGUIAction)
+customEventHooks.registerValidator("OnRecordDynamic", MMAR.OnRecordDynamic)
